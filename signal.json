@@ -1,0 +1,12 @@
+{
+  "test_validation_mode": "subset",
+  "validation_test_files": [
+    "TUnit.Engine.Tests/PassTests.cs",
+    "TUnit.Core.SourceGenerator.Tests/BasicTests.cs",
+    "TUnit.Core.SourceGenerator.Tests/AttributeTests.cs",
+    "TUnit.Assertions.SourceGenerator.Tests/BooleanAssertionGeneratorTests.cs",
+    "TUnit.Assertions.SourceGenerator.Tests/GuidAssertionGeneratorTests.cs"
+  ],
+  "validation_test_file_count": 5,
+  "validation_tests_executed": 8
+}

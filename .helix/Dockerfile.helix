@@ -1,0 +1,23 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+WORKDIR /app
+
+ENV GITHUB_ACTIONS=true
+ENV DisableGitVersionTask=true
+ENV GenerateGitVersionInformation=false
+
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl jq ripgrep wget && rm -rf /var/lib/apt/lists/*
+
+RUN check_min() {       tool=$1 ; min=$2 ; actual=$3 ; ok=$(awk "BEGIN{ split(\"$actual\",a,\".\") ; split(\"$min\",m,\".\") ; for(i=1 ; i<=3 ; i++){ if(a[i]+0>m[i]+0){print 1 ; exit} if(a[i]+0<m[i]+0){print 0 ; exit} } ; print 1}") ; if [ "$ok" -ne 1 ] ; then         echo "FAIL: $tool $actual < minimum $min" >&2 ; exit 1 ; fi ; echo "OK: $tool $actual >= $min" ; } ; check_min git 2.25.0 "$(git --version | awk '{print $3}')" && check_min curl 7.70.0 "$(curl --version | head -1 | awk '{print $2}')" && check_min jq 1.6 "$(jq --version | sed 's/^jq-//')" && check_min rg 13.0.0 "$(rg --version | head -1 | awk '{print $2}')"
+
+RUN check_min() {       tool=$1 ; min=$2 ; actual=$3 ; ok=$(awk "BEGIN{ split(\"$actual\",a,\".\") ; split(\"$min\",m,\".\") ; for(i=1 ; i<=3 ; i++){ if(a[i]+0>m[i]+0){print 1 ; exit} if(a[i]+0<m[i]+0){print 0 ; exit} } ; print 1}") ; if [ "$ok" -ne 1 ] ; then         echo "FAIL: $tool $actual < minimum $min" >&2 ; exit 1 ; fi ; echo "OK: $tool $actual >= $min" ; } ; tool_bin=$(command -v wget) ; check_min wget 1.20.0 "$($tool_bin --progress=dot:giga --version | head -1 | awk '{print $3}')"
+
+COPY . .
+
+RUN git config --global --add safe.directory /app && (git rev-parse --git-dir >/dev/null 2>&1 || (git init -q && git add -A && git -c user.email=ci@local -c user.name=ci commit -q -m "ci snapshot"))
+
+RUN dotnet restore TUnit.CI.slnx
+
+CMD ["dotnet", "test", "TUnit.CI.slnx", "-c", "Release", "--no-restore"]
