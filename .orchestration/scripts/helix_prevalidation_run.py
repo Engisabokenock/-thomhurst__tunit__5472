@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
-Robust helix prevalidation runner used in CI.
-Ensures swe-runner command elements are flattened and stringified to avoid TypeError when nested lists are present.
-This file is intended to be committed directly to the golden-solution branch.
+Helix prevalidation runner wrapper.
+This script runs the metadata extractor, builds the swe-runner command safely
+(by flattening nested lists and converting all elements to strings), and then
+invokes the swe-runner. It tolerates missing GITHUB_BASE_REF when run outside
+of GitHub Actions by accepting explicit --base/--head flags.
 """
 import argparse
 import json
@@ -16,25 +18,13 @@ REPO_ROOT = os.path.abspath(os.path.join(HERE, '..', '..'))
 
 
 def flatten_and_str(seq):
-    """Flatten nested sequences and convert elements to strings. For dicts, use JSON repr."""
-    if seq is None:
-        return []
-    out = []
-    # If a single string was passed, treat as single-element sequence
-    if isinstance(seq, (str, bytes)):
-        return [str(seq)]
-    try:
-        iterator = iter(seq)
-    except TypeError:
-        return [json.dumps(seq)]
-    for item in iterator:
+    """Flatten nested lists/tuples and convert each element to string."""
+    for item in seq:
         if isinstance(item, (list, tuple)):
-            out.extend(flatten_and_str(item))
-        elif isinstance(item, dict):
-            out.append(json.dumps(item, separators=(',', ':')))
+            for inner in flatten_and_str(item):
+                yield str(inner)
         else:
-            out.append(str(item))
-    return out
+            yield str(item)
 
 
 def run_extractor(output_path, base=None, head=None):
@@ -71,46 +61,38 @@ def main():
         print('ERROR: failed to read config: ' + str(ex), file=sys.stderr)
         sys.exit(1)
 
-    # metadata may contain swe-runner configuration; default to just 'swe-runner'
-    meta = cfg.get('metadata', {}) if isinstance(cfg, dict) else {}
-    swe_runner_path = meta.get('swe_runner_path') or 'swe-runner'
-    swe_args = meta.get('swe_runner_args') or []
+    # Example construction of swe-runner command. Real configs may supply a path/list.
+    swe_runner_path = cfg.get('metadata', {}).get('swe_runner_path') or 'swe-runner'
+    swe_args = cfg.get('metadata', {}).get('swe_runner_args') or []
 
-    # If CLI provided an image, prepend it to args; ensure we handle nested lists safely
     if args.image:
-        swe_args = ["--image", args.image] + (swe_args if isinstance(swe_args, list) else [swe_args])
+        # If an image was provided on CLI, prefer it
+        swe_args = ["--image", args.image] + list(swe_args)
 
-    # Build final command list by flattening and stringifying everything
-    raw_cmd = [swe_runner_path]
-    if isinstance(swe_args, (list, tuple)):
-        raw_cmd.extend(swe_args)
-    else:
-        raw_cmd.append(swe_args)
+    swe_runner_cmd = [swe_runner_path,] + list(swe_args)
 
-    safe_cmd = flatten_and_str(raw_cmd)
+    # Defensive: ensure all elements are strings and flatten nested lists
+    swe_runner_cmd_safe = list(flatten_and_str(swe_runner_cmd))
 
-    # Defensive logging
-    try:
-        cmd_str = ' '.join(shlex.quote(s) for s in safe_cmd)
-    except Exception:
-        # Fallback: JSON-encode elements then join
-        cmd_str = ' '.join(json.dumps(s) for s in safe_cmd)
+    # Build a shell-quoted command string for logging or system exec
+    swe_runner_cmd_str = ' '.join(shlex.quote(s) for s in swe_runner_cmd_safe)
 
     print('\nSTAGE: Running swe-runner (command will be shown).')
-    print('COMMAND: ' + cmd_str)
+    print('COMMAND: ' + swe_runner_cmd_str)
 
     if args.dry_run:
         print('Dry run: not executing swe-runner.')
         return
 
-    # Execute the command
+    # Execute the command in a subprocess (shell=False with list of args)
     try:
-        ret = subprocess.call(safe_cmd, cwd=REPO_ROOT)
+        # Use the safe flattened list when invoking directly
+        ret = subprocess.call(swe_runner_cmd_safe, cwd=REPO_ROOT)
         if ret != 0:
             print(f'swe-runner exited with code {ret}', file=sys.stderr)
             sys.exit(ret)
     except FileNotFoundError:
-        print('ERROR: swe-runner binary not found: ' + (safe_cmd[0] if safe_cmd else 'UNKNOWN'), file=sys.stderr)
+        print('ERROR: swe-runner binary not found: ' + swe_runner_cmd_safe[0], file=sys.stderr)
         sys.exit(1)
     except Exception as ex:
         print('ERROR: failed to run swe-runner: ' + str(ex), file=sys.stderr)
