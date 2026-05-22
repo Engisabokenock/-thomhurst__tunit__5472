@@ -42,6 +42,10 @@ def main():
             print('ERROR: failed to parse metadata.json: ' + str(ex), file=sys.stderr)
             sys.exit(1)
 
+    # metadata.json can be an object or an array of objects; normalize to a dict
+    if isinstance(metadata, list) and len(metadata) > 0:
+        metadata = metadata[0]
+
     # Determine base/head refs
     base = args.base or os.environ.get('GITHUB_BASE_REF')
     head = args.head or os.environ.get('GITHUB_HEAD_REF') or os.environ.get('GITHUB_REF')
